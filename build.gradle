@@ -1,0 +1,88 @@
+plugins {
+    id "java"
+    id "application"
+    id "edu.sc.seis.launch4j" version "2.4.6"
+    id "com.github.johnrengelman.shadow" version "5.1.0"
+}
+
+group "dev.kerastinell"
+version "0.1"
+sourceCompatibility = 1.8
+mainClassName = "dev.kerastinell.pochtaizv.Main"
+
+repositories {
+    mavenCentral()
+    jcenter()
+}
+
+dependencies {
+    implementation "uk.org.okapibarcode:okapibarcode:0.2.0"
+    implementation "org.json:json:20180813"
+}
+
+compileJava {
+    options.encoding = "UTF-8"
+}
+
+//noinspection GroovyAssignabilityCheck
+def releaseDirectory = new File(project.buildDir, "release/${project.version}")
+
+//noinspection GrDeprecatedAPIUsage
+shadowJar.destinationDir = releaseDirectory
+jar {
+    manifest {
+        attributes "Implementation-Title": "${project.name}"
+        attributes "Implementation-Version": "${project.version}"
+        attributes "Implementation-Vendor": "kerastinell"
+        attributes "Implementation-URL": "https://github.com/kerastinell/pochtaizv"
+
+    }
+}
+
+shadowJar {
+    baseName = project.name
+    classifier = null
+    version = null
+    minimize()
+}
+
+launch4j {
+    outputDir = "release/${project.version}"
+    outfile = "${project.name}.exe"
+    mainClassName = project.mainClassName
+    copyConfigurable = project.tasks.shadowJar.outputs.files
+    jar = "${project.tasks.shadowJar.archiveName}"
+    headerType = "console"
+}
+
+task refreshTemplate {
+    doLast {
+        final File template = new File("data/template.odg")
+        for (File srcDir : sourceSets.main.resources.srcDirs) {
+            File templateDir = new File(srcDir, "template")
+            if (templateDir.exists())
+                delete templateDir
+            mkdir templateDir
+
+            copy { // Распаковать .odg шаблон
+                from zipTree(template)
+                into templateDir
+            }
+
+            // Удалить лишние файлы, которые могли попасть
+            // в .odg после сохранения изменённого файла
+            delete new File(templateDir, "Configurations2")
+            delete new File(templateDir, "Thumbnails")
+        }
+    }
+}
+
+processResources.dependsOn refreshTemplate
+processTestResources.dependsOn refreshTemplate
+
+task release(dependsOn: [shadowJar, createExe]) {
+    doLast {
+        // Удалить директорию lib/ после сборки .jar и .exe
+        delete new File(releaseDirectory, "lib")
+    }
+}
