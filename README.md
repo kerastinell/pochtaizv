@@ -23,7 +23,12 @@ pochtaizv генерирует извещения в формате OpenDocument
 
 * Windows (.exe): `pochtaizv [ПАРАМЕТР...]` в командной строке. Двойной клик по .exe также откроет окно командной строки.
 * Linux (если установлен `jarwrapper`) (.jar): `pochtaizv.jar [ПАРАМЕТР]...`
-* Универсальный метод, любая ОС (.jar): `java -jar pochtaizv.jar [ПАРАМЕТР]...`  
+* Универсальный метод, любая ОС (.jar): `java -jar pochtaizv.jar [ПАРАМЕТР]...`
+
+## Параметры
+
+Запуск программы с ключом `-h` (`-help` и `--help` тоже работают) выведет справку на экран.
+Альтернативно можно посмотреть [файл справки онлайн](https://github.com/kerastinell/pochtaizv/blob/master/src/main/resources/help). 
 
 ## Вариант использования (Windows)
 
