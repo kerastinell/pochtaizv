@@ -2,44 +2,31 @@ package dev.kerastinell.pochtaizv;
 
 import dev.kerastinell.pochtaizv.util.Logger;
 import dev.kerastinell.pochtaizv.util.TextUtils;
-import dev.kerastinell.pochtaizv.util.io.IoUtils;
 import dev.kerastinell.pochtaizv.values.Constants;
 import dev.kerastinell.pochtaizv.values.GlobalOptions;
+import okhttp3.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import javax.net.ssl.HttpsURLConnection;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.StringJoiner;
 import java.util.stream.IntStream;
-import java.util.zip.GZIPInputStream;
 
 /**
  * Класс для взаимодействия с сервером Почты России и
  * загрузки оттуда данных об отправлениях.
  */
 public class PochtaDataFetcher {
-	private static final String URL_COOKIES = "https://www.pochta.ru/tracking";
+	private static final String URL_INIT = "https://www.pochta.ru/tracking";
 	private static String URL_TRACKING; // Задаётся единожды при инициализации
 
-	private final HashMap<String, String> headers;
+	// Клиент для запросов к серверу. Сохраняет cookies.
+	private final OkHttpClient httpClient;
 
-	private final  Thread initializationThread;
+	private final Thread initializationThread;
 
 	public PochtaDataFetcher() {
-		// Изначальный набор заголовков для запроса cookies. После получения
-		// cookies добавятся некоторые другие заголовки, чтобы работало отслеживание
-		// почтовых отправлений
-		headers = new HashMap<>();
-		headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-		headers.put("Accept-Encoding", "gzip, deflate, br");
-		headers.put("Accept-Language", "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3");
-		headers.put("User-Agent", GlobalOptions.API_USER_AGENT);
-
+		httpClient = new OkHttpClient();
 		initializationThread = new Thread(this::getCookies, "PochtaDataFetcher Initialization Thread");
 	}
 
@@ -61,27 +48,30 @@ public class PochtaDataFetcher {
 	 */
 	private void getCookies() {
 		try {
-			Logger.verbose("[PochtaDataFetcher] Запрос cookies");
-			final StringJoiner cookies = new StringJoiner("; ");
-			final HttpsURLConnection conn = connect(URL_COOKIES);
+			Logger.verbose("[PochtaDataFetcher] Инициализация");
 
-			// Извлечь cookies из заголовка ответа сервера
-			conn.getHeaderFields().get("Set-Cookie").forEach(cookies::add);
+			Request initRequest = new Request.Builder()
+					.url(URL_INIT)
+					.addHeader("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
+					.addHeader("accept-language", "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3")
+					.addHeader("sec-fetch-dest", "document")
+					.addHeader("sec-fetch-mode", "navigate")
+					.addHeader("sec-fetch-site", "none")
+					.addHeader("sec-fetch-user", "?1")
+					.addHeader("upgrade-insecure-requests", "1")
+					.addHeader("user-agent", GlobalOptions.API_USER_AGENT)
+					.build();
 
-			// Помимо загруженных cookies надо дополнительно добавить:
-			cookies.add("HeaderBusinessTooltip=showed");
-
-			// Добавить cookies и некоторые другие параметры к заголовкам последующих запросов
-			headers.put("Cookie", cookies.toString());
-			headers.put("TE", "Trailers");
-			headers.put("Referer", "https://www.pochta.ru/tracking");
-			headers.put("X-Requested-With", "XMLHttpRequest");
+			final Response initResponse = httpClient.newCall(initRequest).execute();
+			if (!initResponse.isSuccessful())
+				throw new RuntimeException("!initResponse.isSuccessful()");
 
 			Logger.verbose("[PochtaDataFetcher] Извлечение ссылки для отслеживания отправлений");
-			final String html = readResponse(conn);
-			int beginIndex = html.indexOf("getUrl:\"") + "getUrl:\"".length();
-			int endIndex = html.indexOf("\"", beginIndex);
-			URL_TRACKING = html.substring(beginIndex, endIndex);
+			final String html = initResponse.body().string();
+			final String urlKey = "getTrackingsByBarcodesUrl:\"";
+			int idxBegin = html.indexOf(urlKey) + urlKey.length();
+			int idxEnd = html.indexOf("\"", idxBegin);
+			URL_TRACKING = html.substring(idxBegin, idxEnd);
 
 			Logger.verbose("[PochtaDataFetcher] Инициализация завершена!");
 		} catch (IOException exception) {
@@ -126,19 +116,36 @@ public class PochtaDataFetcher {
 		try {
 			Logger.track(trackingCode, "Запрашиваю данные об отправлении");
 
-			@SuppressWarnings("StringBufferReplaceableByString")
-			final String url = new StringBuilder(URL_TRACKING)
-					.append("&barcodeList=").append(trackingCode)
-					.append("&_=").append(System.currentTimeMillis()).toString();
-			HttpsURLConnection conn = connect(url);
+			final RequestBody trackingPostData = new MultipartBody.Builder()
+					.setType(MultipartBody.FORM)
+					.addFormDataPart("barcodes", trackingCode)
+					.build();
 
-			json = readResponse(conn);
+			final Request trackingRequest = new Request.Builder()
+					.url(URL_TRACKING)
+					.addHeader("accept", "*/*")
+					.addHeader("accept-language", "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3")
+					.addHeader("sec-fetch-dest", "document")
+					.addHeader("sec-fetch-mode", "navigate")
+					.addHeader("sec-fetch-site", "none")
+					.addHeader("sec-fetch-user", "?1")
+					.addHeader("upgrade-insecure-requests", "1")
+					.addHeader("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36")
+					.post(trackingPostData)
+					.build();
+
+			final Response trackingResponse = httpClient.newCall(trackingRequest).execute();
+			if (!trackingResponse.isSuccessful())
+				throw new RuntimeException("!trackingResponse.isSuccessful()");
+
+			json = trackingResponse.body().string();
 			final JSONObject jTracking = new JSONObject(json)
-					.optJSONArray("list")
+					.optJSONArray("response")
 					.optJSONObject(0);
 			final JSONArray jTrackingHistory = jTracking.optJSONObject("trackingItem")
 					.optJSONArray("trackingHistoryItemList");
 			final JSONObject jForm22 = jTracking.optJSONObject("formF22Params");
+			final JSONObject jPostOffice = jTracking.optJSONObject("officeSummary");
 
 			// Определить статус отправления по истории отслеживания
 			if (jTrackingHistory.isEmpty()) {
@@ -150,7 +157,7 @@ public class PochtaDataFetcher {
 			}
 
 			// В некоторых случаях сервер Почты России не включает в JSON объект formF22Params
-			if (jTracking.isNull("formF22Params")) {
+			if (jForm22 == null) {
 				Logger.track(trackingCode, "Сервер не вернул данные об отправлении!");
 				return apiData;
 			}
@@ -169,7 +176,12 @@ public class PochtaDataFetcher {
 			apiData.put("Плата за досыл", ""); // TODO Найти образцы с платой за досыл
 			apiData.put("Таможенная пошлина", TextUtils.formatCurrency(jForm22.optDouble("CustomDuty", 0)));
 
-			final JSONObject jPostOffice = jTracking.optJSONObject("officeSummary");
+			// Для некоторых отправлений отсутствует информация о почтовом отделении
+			if (jPostOffice == null) {
+				Logger.track(trackingCode, "Сервер не вернул данные о почтовом отделении!");
+				return apiData;
+			}
+
 			final JSONArray jPostOfficeSchedule = jPostOffice.optJSONArray("workingSchedule");
 			final JSONArray jPostOfficePhones = jPostOffice.optJSONArray("phones");
 
@@ -178,45 +190,12 @@ public class PochtaDataFetcher {
 					jPostOfficeSchedule,
 					jPostOfficePhones));
 			apiData.put("Вызов курьера", jPostOfficePhones.optString(0));
-
 		} catch (Exception exception) {
-			Logger.error("Ошибка при взаимодействии с сервером Почты России!", exception);
+			Logger.error("Ошибка при обработке данных!", exception);
 			Logger.error(json);
 		}
 
 		return apiData;
-	}
-
-	/**
-	 * Устанавливает связь с удалённым сервером.
-	 * @param url Адрес ресурса
-	 * @return Подключение к серверу
-	 * @throws IOException При ошибке подключения
-	 */
-	private HttpsURLConnection connect(String url) throws IOException {
-		final URL endpoint = new URL(url);
-		HttpsURLConnection connection = (HttpsURLConnection) endpoint.openConnection();
-		headers.forEach(connection::addRequestProperty);
-
-		return connection;
-	}
-
-	/**
-	 * Считывает ответ сервера в строку.
-	 * @param connection Подключение к серверу
-	 * @return Ответ сервера
-	 * @throws IOException При ошибке подключения
-	 */
-	private String readResponse(HttpsURLConnection connection) throws IOException {
-		try (
-				GZIPInputStream input = new GZIPInputStream(connection.getInputStream());
-				ByteArrayOutputStream output = new ByteArrayOutputStream()
-		) {
-			IoUtils.transfer(input, output);
-			return output.toString(StandardCharsets.UTF_8.name());
-		} finally {
-			connection.disconnect();
-		}
 	}
 
 	/**
