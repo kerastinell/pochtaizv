@@ -6,7 +6,7 @@ plugins {
 }
 
 group "dev.kerastinell"
-version "0.2"
+version "0.2.1"
 sourceCompatibility = 1.8
 mainClassName = "dev.kerastinell.pochtaizv.Main"
 

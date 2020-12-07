@@ -1,6 +1,7 @@
 package dev.kerastinell.pochtaizv.util.io;
 
 import dev.kerastinell.pochtaizv.util.Logger;
+import okhttp3.Response;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -34,7 +35,7 @@ public class IoUtils {
 
 	/**
 	 * Пытается закрыть выходной поток.
-	 * @param stream Выходной поток для закрытия. Если stream не задан, ничего не произойдет.
+	 * @param stream Выходной поток для закрытия. Если stream не определён, ничего не произойдет.
 	 */
 	public static void closeOutputStream(OutputStream stream) {
 		if (stream == null)
@@ -51,6 +52,15 @@ public class IoUtils {
 		} catch (IOException exception) {
 			Logger.error("Ошибка при закрытии потока!", exception);
 		}
+	}
+
+	/**
+	 * Пытается закрыть тело ответа сервера.
+	 * @param response Ответ сервера. Если response не определён, ничего не произойдёт.
+	 */
+	public static void closeResponse(Response response) {
+		if (response != null)
+			response.close();
 	}
 
 	/**

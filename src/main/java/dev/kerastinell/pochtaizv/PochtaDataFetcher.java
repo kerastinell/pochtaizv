@@ -2,6 +2,7 @@ package dev.kerastinell.pochtaizv;
 
 import dev.kerastinell.pochtaizv.util.Logger;
 import dev.kerastinell.pochtaizv.util.TextUtils;
+import dev.kerastinell.pochtaizv.util.io.IoUtils;
 import dev.kerastinell.pochtaizv.values.Constants;
 import dev.kerastinell.pochtaizv.values.GlobalOptions;
 import okhttp3.*;
@@ -39,6 +40,13 @@ public class PochtaDataFetcher {
 	}
 
 	/**
+	 * Завершает работу.
+	 */
+	public void finish() {
+		httpClient.connectionPool().evictAll();
+	}
+
+	/**
 	 * Первично обращается к серверу Почты России, сохраняет cookies
 	 * и извлекает API endpoint для отслеживания отправлений.
 	 *
@@ -47,10 +55,12 @@ public class PochtaDataFetcher {
 	 * В случае ошибки устанавливается флаг {@link GlobalOptions#OFFLINE}
 	 */
 	private void getCookies() {
+		Response initResponse = null;
+
 		try {
 			Logger.verbose("[PochtaDataFetcher] Инициализация");
 
-			Request initRequest = new Request.Builder()
+			final Request initRequest = new Request.Builder()
 					.url(URL_INIT)
 					.addHeader("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 					.addHeader("accept-language", "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3")
@@ -62,7 +72,7 @@ public class PochtaDataFetcher {
 					.addHeader("user-agent", GlobalOptions.API_USER_AGENT)
 					.build();
 
-			final Response initResponse = httpClient.newCall(initRequest).execute();
+			initResponse = httpClient.newCall(initRequest).execute();
 			if (!initResponse.isSuccessful())
 				throw new RuntimeException("!initResponse.isSuccessful()");
 
@@ -78,6 +88,8 @@ public class PochtaDataFetcher {
 			Logger.error("Ошибка при инициализации! Будет включен оффлайн-режим", exception);
 
 			GlobalOptions.OFFLINE = true;
+		} finally {
+			IoUtils.closeResponse(initResponse);
 		}
 	}
 
@@ -107,6 +119,7 @@ public class PochtaDataFetcher {
 				"Масса", "Объявленная ценность", "Наложенный платеж", "Плата за возврат",
 				"Плата за досыл", "Таможенная пошлина", "Получатель.Адрес.Выдача", "Вызов курьера");
 
+		Response trackingResponse = null;
 		String json = "";
 
 		// Строка trackingCode может быть пустой, если пользователь включил тихий режим и не указал коды отслеживания
@@ -134,7 +147,7 @@ public class PochtaDataFetcher {
 					.post(trackingPostData)
 					.build();
 
-			final Response trackingResponse = httpClient.newCall(trackingRequest).execute();
+			trackingResponse = httpClient.newCall(trackingRequest).execute();
 			if (!trackingResponse.isSuccessful())
 				throw new RuntimeException("!trackingResponse.isSuccessful()");
 
@@ -193,6 +206,8 @@ public class PochtaDataFetcher {
 		} catch (Exception exception) {
 			Logger.error("Ошибка при обработке данных!", exception);
 			Logger.error(json);
+		} finally {
+			IoUtils.closeResponse(trackingResponse);
 		}
 
 		return apiData;

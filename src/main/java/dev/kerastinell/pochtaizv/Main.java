@@ -35,5 +35,6 @@ public class Main {
 		} catch (InterruptedException exception) {
 			Logger.error("Ожидание завершения задач прервано!", exception);
 		}
+		pochtaDataFetcher.finish();
 	}
 }
